@@ -25,17 +25,18 @@
 #include "../common.hpp"
 #include "monotonic_deadline_timer.hpp"
 
+#include "ns3/simulator.h"
+
 #include <set>
 
 namespace ndn {
 namespace util {
 namespace scheduler {
 
-struct EventIdImpl; ///< \brief Private storage of information about the event
-/**
- * \brief Opaque type (shared_ptr) representing ID of the scheduled event
+/** \class EventId
+ *  \brief Opaque type (shared_ptr) representing ID of a scheduled event
  */
-typedef shared_ptr<EventIdImpl> EventId;
+typedef std::shared_ptr<ns3::EventId> EventId;
 
 /**
  * \brief Generic scheduler
@@ -46,6 +47,8 @@ public:
   typedef function<void()> Event;
 
   Scheduler(boost::asio::io_service& ioService);
+
+  ~Scheduler();
 
   /**
    * \brief Schedule one time event after the specified delay
@@ -65,10 +68,6 @@ public:
    */
   void
   cancelAllEvents();
-
-private:
-  void
-  onEvent(const boost::system::error_code& code);
 
 private:
   struct EventInfo
@@ -97,14 +96,10 @@ private:
     mutable EventId m_eventId;
   };
 
-  typedef std::multiset<EventInfo> EventQueue;
-  friend struct EventIdImpl;
+  typedef std::multiset<EventId> EventQueue;
 
   EventQueue m_events;
   EventQueue::iterator m_scheduledEvent;
-  monotonic_deadline_timer m_deadlineTimer;
-
-  bool m_isEventExecuting;
 };
 
 } // namespace scheduler
