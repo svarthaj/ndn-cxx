@@ -168,16 +168,6 @@ public: // constructors
   Face(boost::asio::io_service& ioService);
 
   /**
-   * @brief Create a new Face using TcpTransport
-   *
-   * @param host The host of the NDN forwarder
-   * @param port (optional) The port or service name of the NDN forwarder (**default**: "6363")
-   *
-   * @throws Face::Error on unsupported protocol
-   */
-  Face(const std::string& host, const std::string& port = "6363");
-
-  /**
    * @brief Create a new Face using the given Transport
    * @param transport the Transport used for communication. If nullptr, then the default
    *                  transport will be used.
@@ -668,12 +658,12 @@ public: // IO routine
   shutdown();
 
   /**
-   * @brief Get reference to IO service object
+   * @brief Return nullptr (cannot use IoService in simulations), preserved for API compatibility
    */
   boost::asio::io_service&
   getIoService()
   {
-    return m_ioService;
+    return *static_cast<boost::asio::io_service*>(nullptr);
   }
 
 NDN_CXX_PUBLIC_WITH_TESTS_ELSE_PROTECTED:
@@ -705,20 +695,7 @@ private:
   asyncShutdown();
 
 private:
-  /// the IO service owned by this Face, could be null
-  unique_ptr<boost::asio::io_service> m_internalIoService;
-  /// the IO service used by this Face
-  boost::asio::io_service& m_ioService;
-
   shared_ptr<Transport> m_transport;
-
-  /** @brief if not null, a pointer to an internal KeyChain owned by Face
-   *  @note if a KeyChain is supplied to constructor, this pointer will be null,
-   *        and the passed KeyChain is given to nfdController;
-   *        currently Face does not keep the KeyChain passed in constructor
-   *        because it's not needed, but this may change in the future
-   */
-  unique_ptr<KeyChain> m_internalKeyChain;
 
   unique_ptr<nfd::Controller> m_nfdController;
 

@@ -29,58 +29,42 @@
 #include "util/random.hpp"
 #include "util/face-uri.hpp"
 
+#include "ns3/node-list.h"
+#include "ns3/ndnSIM/helper/ndn-stack-helper.hpp"
+#include "ns3/ndnSIM/NFD/daemon/face/generic-link-service.hpp"
+#include "ns3/ndnSIM/NFD/daemon/face/internal-transport.hpp"
+
 namespace ndn {
 
 Face::Face()
-  : m_internalIoService(new boost::asio::io_service())
-  , m_ioService(*m_internalIoService)
-  , m_internalKeyChain(new KeyChain())
-  , m_impl(new Impl(*this))
+  : m_impl(new Impl(*this))
 {
-  construct(nullptr, *m_internalKeyChain);
+  construct(nullptr, ns3::ndn::StackHelper::getKeyChain());
 }
 
 Face::Face(boost::asio::io_service& ioService)
-  : m_ioService(ioService)
-  , m_internalKeyChain(new KeyChain())
-  , m_impl(new Impl(*this))
+  : m_impl(new Impl(*this))
 {
-  construct(nullptr, *m_internalKeyChain);
-}
-
-Face::Face(const std::string& host, const std::string& port/* = "6363"*/)
-  : m_internalIoService(new boost::asio::io_service())
-  , m_ioService(*m_internalIoService)
-  , m_internalKeyChain(new KeyChain())
-  , m_impl(new Impl(*this))
-{
-  construct(make_shared<TcpTransport>(host, port), *m_internalKeyChain);
+  construct(nullptr, ns3::ndn::StackHelper::getKeyChain());
 }
 
 Face::Face(shared_ptr<Transport> transport)
-  : m_internalIoService(new boost::asio::io_service())
-  , m_ioService(*m_internalIoService)
-  , m_internalKeyChain(new KeyChain())
-  , m_impl(new Impl(*this))
+  : m_impl(new Impl(*this))
 {
-  construct(transport, *m_internalKeyChain);
+  construct(transport, ns3::ndn::StackHelper::getKeyChain());
 }
 
 Face::Face(shared_ptr<Transport> transport,
            boost::asio::io_service& ioService)
-  : m_ioService(ioService)
-  , m_internalKeyChain(new KeyChain())
-  , m_impl(new Impl(*this))
+  : m_impl(new Impl(*this))
 {
-  construct(transport, *m_internalKeyChain);
+  construct(transport, ns3::ndn::StackHelper::getKeyChain());
 }
 
 Face::Face(shared_ptr<Transport> transport,
            boost::asio::io_service& ioService,
            KeyChain& keyChain)
-  : m_ioService(ioService)
-  , m_internalKeyChain(nullptr)
-  , m_impl(new Impl(*this))
+  : m_impl(new Impl(*this))
 {
   construct(transport, keyChain);
 }
@@ -88,35 +72,25 @@ Face::Face(shared_ptr<Transport> transport,
 shared_ptr<Transport>
 Face::makeDefaultTransport()
 {
-  // transport=unix:///var/run/nfd.sock
-  // transport=tcp://localhost:6363
+  ns3::Ptr<ns3::Node> node = ns3::NodeList::GetNode(ns3::Simulator::GetContext());
+  NS_ASSERT_MSG(node->GetObject<ns3::ndn::L3Protocol>() != 0,
+                "NDN stack should be installed on the node " << node);
 
-  ConfigFile config;
-  const auto& transportUri = config.getParsedConfiguration()
-                               .get_optional<std::string>("transport");
-  if (!transportUri) {
-    // transport not specified, use default Unix transport.
-    return UnixTransport::create(config);
-  }
+  auto uri = ::nfd::FaceUri("ndnFace://" + boost::lexical_cast<std::string>(node->GetId()));
 
-  std::string protocol;
-  try {
-    util::FaceUri uri(*transportUri);
-    protocol = uri.getScheme();
-  }
-  catch (const util::FaceUri::Error& error) {
-    BOOST_THROW_EXCEPTION(ConfigFile::Error(error.what()));
-  }
+  ::nfd::face::GenericLinkService::Options serviceOpts;
+  serviceOpts.allowLocalFields = true;
 
-  if (protocol == "unix") {
-    return UnixTransport::create(config);
-  }
-  else if (protocol == "tcp" || protocol == "tcp4" || protocol == "tcp6") {
-    return TcpTransport::create(config);
-  }
-  else {
-    BOOST_THROW_EXCEPTION(ConfigFile::Error("Unsupported transport protocol \"" + protocol + "\""));
-  }
+  auto nfdFace = make_shared<::nfd::Face>(make_unique<::nfd::face::GenericLinkService>(serviceOpts),
+                                          make_unique<::nfd::face::InternalForwarderTransport>(uri, uri));
+  auto forwarderTransport = static_cast<::nfd::face::InternalForwarderTransport*>(nfdFace->getTransport());
+
+  auto clientTransport = make_shared<::nfd::face::InternalClientTransport>();
+  clientTransport->connectToForwarder(forwarderTransport);
+
+  node->GetObject<ns3::ndn::L3Protocol>()->addFace(nfdFace);;
+
+  return clientTransport;
 }
 
 void
@@ -129,8 +103,6 @@ Face::construct(shared_ptr<Transport> transport, KeyChain& keyChain)
   m_transport = transport;
 
   m_nfdController.reset(new nfd::Controller(*this, keyChain));
-
-  m_ioService.post([=] { m_impl->ensureConnected(false); });
 }
 
 Face::~Face() = default;
@@ -155,8 +127,10 @@ Face::expressInterest(const Interest& interest,
   }
 
   // If the same ioService thread, dispatch directly calls the method
-  m_ioService.dispatch([=] { m_impl->asyncExpressInterest(interestToExpress, afterSatisfied,
-                                                          afterNacked, afterTimeout); });
+  m_impl->m_scheduler.scheduleEvent(time::seconds(0), [=] {
+      m_impl->asyncExpressInterest(interestToExpress, afterSatisfied,
+                                   afterNacked, afterTimeout);
+    });
 
   return reinterpret_cast<const PendingInterestId*>(interestToExpress.get());
 }
@@ -211,25 +185,25 @@ Face::put(const Data& data)
   }
 
   // If the same ioService thread, dispatch directly calls the method
-  m_ioService.dispatch([=] { m_impl->asyncPutData(dataPtr); });
+  m_impl->m_scheduler.scheduleEvent(time::seconds(0), [=] { m_impl->asyncPutData(dataPtr); });
 }
 
 void
 Face::put(const lp::Nack& nack)
 {
-  m_ioService.dispatch([=] { m_impl->asyncPutNack(make_shared<lp::Nack>(nack)); });
+  m_impl->m_scheduler.scheduleEvent(time::seconds(0), [=] { m_impl->asyncPutNack(make_shared<lp::Nack>(nack)); });
 }
 
 void
 Face::removePendingInterest(const PendingInterestId* pendingInterestId)
 {
-  m_ioService.post([=] { m_impl->asyncRemovePendingInterest(pendingInterestId); });
+  m_impl->m_scheduler.scheduleEvent(time::seconds(0), [=] { m_impl->asyncRemovePendingInterest(pendingInterestId); });
 }
 
 void
 Face::removeAllPendingInterests()
 {
-  m_ioService.post([=] { m_impl->asyncRemoveAllPendingInterests(); });
+  m_impl->m_scheduler.scheduleEvent(time::seconds(0), [=] { m_impl->asyncRemoveAllPendingInterests(); });
 }
 
 size_t
@@ -279,7 +253,9 @@ Face::setInterestFilter(const InterestFilter& interestFilter,
   shared_ptr<InterestFilterRecord> filter =
     make_shared<InterestFilterRecord>(interestFilter, onInterest);
 
-  getIoService().post([=] { m_impl->asyncSetInterestFilter(filter); });
+  m_impl->m_scheduler.scheduleEvent(time::seconds(0), [=] {
+      m_impl->asyncSetInterestFilter(filter);
+    });
 
   return reinterpret_cast<const InterestFilterId*>(filter.get());
 }
@@ -396,7 +372,7 @@ Face::registerPrefix(const Name& prefix,
 void
 Face::unsetInterestFilter(const RegisteredPrefixId* registeredPrefixId)
 {
-  m_ioService.post([=] { m_impl->asyncUnregisterPrefix(registeredPrefixId,
+  m_impl->m_scheduler.scheduleEvent(time::seconds(0), [=] { m_impl->asyncUnregisterPrefix(registeredPrefixId,
                                                        UnregisterPrefixSuccessCallback(),
                                                        UnregisterPrefixFailureCallback()); });
 }
@@ -404,7 +380,7 @@ Face::unsetInterestFilter(const RegisteredPrefixId* registeredPrefixId)
 void
 Face::unsetInterestFilter(const InterestFilterId* interestFilterId)
 {
-  m_ioService.post([=] { m_impl->asyncUnsetInterestFilter(interestFilterId); });
+  m_impl->m_scheduler.scheduleEvent(time::seconds(0), [=] { m_impl->asyncUnsetInterestFilter(interestFilterId); });
 }
 
 void
@@ -412,53 +388,19 @@ Face::unregisterPrefix(const RegisteredPrefixId* registeredPrefixId,
                        const UnregisterPrefixSuccessCallback& onSuccess,
                        const UnregisterPrefixFailureCallback& onFailure)
 {
-  m_ioService.post([=] { m_impl->asyncUnregisterPrefix(registeredPrefixId,onSuccess, onFailure); });
+  m_impl->m_scheduler.scheduleEvent(time::seconds(0), [=] { m_impl->asyncUnregisterPrefix(registeredPrefixId,onSuccess, onFailure); });
 }
 
 void
 Face::processEvents(const time::milliseconds& timeout/* = time::milliseconds::zero()*/,
                     bool keepThread/* = false*/)
 {
-  if (m_ioService.stopped()) {
-    m_ioService.reset(); // ensure that run()/poll() will do some work
-  }
-
-  try {
-    if (timeout < time::milliseconds::zero()) {
-        // do not block if timeout is negative, but process pending events
-        m_ioService.poll();
-        return;
-      }
-
-    if (timeout > time::milliseconds::zero()) {
-      boost::asio::io_service& ioService = m_ioService;
-      unique_ptr<boost::asio::io_service::work>& work = m_impl->m_ioServiceWork;
-      m_impl->m_processEventsTimeoutEvent =
-        m_impl->m_scheduler.scheduleEvent(timeout, [&ioService, &work] {
-            ioService.stop();
-            work.reset();
-          });
-    }
-
-    if (keepThread) {
-      // work will ensure that m_ioService is running until work object exists
-      m_impl->m_ioServiceWork.reset(new boost::asio::io_service::work(m_ioService));
-    }
-
-    m_ioService.run();
-  }
-  catch (...) {
-    m_impl->m_ioServiceWork.reset();
-    m_impl->m_pendingInterestTable.clear();
-    m_impl->m_registeredPrefixTable.clear();
-    throw;
-  }
 }
 
 void
 Face::shutdown()
 {
-  m_ioService.post([this] { this->asyncShutdown(); });
+  m_impl->m_scheduler.scheduleEvent(time::seconds(0), [this] { this->asyncShutdown(); });
 }
 
 void
@@ -469,8 +411,6 @@ Face::asyncShutdown()
 
   if (m_transport->isConnected())
     m_transport->close();
-
-  m_impl->m_ioServiceWork.reset();
 }
 
 /**
