@@ -73,6 +73,11 @@ typedef detail::FieldDecl<field_location_tags::Header,
                           tlv::CongestionMark> CongestionMarkField;
 BOOST_CONCEPT_ASSERT((Field<CongestionMarkField>));
 
+typedef detail::FieldDecl<field_location_tags::Header,
+                          uint64_t,
+                          tlv::HopCountTag> HopCountTagField;
+BOOST_CONCEPT_ASSERT((Field<HopCountTagField>));
+
 /**
  * The value of the wire encoded field is the data between the provided iterators. During
  * encoding, the data is copied from the Buffer into the wire buffer.
@@ -94,7 +99,8 @@ typedef boost::mpl::set<
   NextHopFaceIdField,
   CachePolicyField,
   IncomingFaceIdField,
-  CongestionMarkField
+  CongestionMarkField,
+  HopCountTagField
   > FieldSet;
 
 } // namespace lp
