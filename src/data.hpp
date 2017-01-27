@@ -30,6 +30,8 @@
 #include "key-locator.hpp"
 #include "tag-host.hpp"
 
+#include "prodloc-info.hpp"
+
 namespace ndn {
 
 /** @brief represents a Data packet
@@ -281,6 +283,56 @@ public:
   Data&
   setSignatureValue(const Block& value);
 
+public: // ProdLoc
+  
+  bool
+  hasProdLoc() const
+  {
+    return !m_prodloc.empty();
+  }
+
+  const ProdLocInfo&
+  getProdLocInfo() const
+  {
+    return m_prodloc;
+  }
+
+  Data&
+  setProdLocInfo(const ProdLocInfo& prodloc)
+  {
+    m_prodloc = prodloc;
+    m_wire.reset();
+    return *this;
+  }
+
+  int
+  getLocation() const
+  {
+    return m_prodloc.getLocation();
+  }
+
+  Data&
+  setLocation(uint32_t location)
+  {
+    m_prodloc.setLocation(location);
+    m_wire.reset();
+    return *this;
+  }
+
+  int
+  getDistanceHA() const
+  {
+    return m_prodloc.getDistanceHA();
+  }
+
+  Data&
+  setDistanceHA(uint32_t dist)
+  {
+    m_prodloc.setDistanceHA(dist);
+    m_wire.reset();
+    return *this;
+  }
+
 public: // EqualityComparable concept
   bool
   operator==(const Data& other) const;
@@ -300,7 +352,8 @@ private:
   MetaInfo m_metaInfo;
   mutable Block m_content;
   Signature m_signature;
-
+  ProdLocInfo m_prodloc;
+ 
   mutable Block m_wire;
   mutable Name m_fullName;
 };
